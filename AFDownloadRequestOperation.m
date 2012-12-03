@@ -77,7 +77,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
         }
 
         // Download is saved into a temorary file and renamed upon completion.
-      NSString *tempPath = [self tempPath];
+        NSString *tempPath = [self tempPath];
 
         // Do we need to resume the file?
         BOOL isResuming = [self updateByteStartRangeForRequest];
@@ -235,6 +235,14 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
             }
         }
     }
+  
+    // If file has been downloaded, completion block will be fired.
+    unsigned long long downloadedBytes = [self fileSizeForPath:[self tempPath]];
+    if (downloadedBytes == totalContentLength) {
+      self.completionBlock();
+      [self cancel];
+      return;
+    }
 
     self.totalBytesReadPerDownload = 0;
     self.offsetContentLength = MAX(fileOffset, 0);
@@ -243,6 +251,9 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data  {
+    if (self.isCancelled)
+      return;
+  
     [super connection:connection didReceiveData:data];
 
     // track custom bytes read because totalBytesRead persists between pause/resume.
