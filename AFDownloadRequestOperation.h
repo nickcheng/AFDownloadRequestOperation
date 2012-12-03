@@ -68,13 +68,23 @@
 ///----------------------------------
 
 /**
- Creates and returns an `AFDownloadRequestOperation`
+ Creates and returns an `AFDownloadRequestOperation`. This method uses temporary file.
  @param urlRequest The request object to be loaded asynchronously during execution of the operation
  @param targetPath The target path (with or without file name)
  @param shouldResume If YES, tries to resume a partial download if found.
  @return A new download request operation
  */
 - (id)initWithRequest:(NSURLRequest *)urlRequest targetPath:(NSString *)targetPath shouldResume:(BOOL)shouldResume;
+/**
+ Creates and returns an `AFDownloadRequestOperation`
+ @param urlRequest The request object to be loaded asynchronously during execution of the operation
+ @param targetPath The target path (with or without file name)
+ @param shouldResume If YES, tries to resume a partial download if found.
+ @param useTemporaryFile If YES, a temporary file will be use until full content have been downloaded.
+ @return A new download request operation
+ */
+- (id)initWithRequest:(NSURLRequest *)urlRequest targetPath:(NSString *)targetPath shouldResume:(BOOL)shouldResume useTemporaryFile:(BOOL)useTemporaryFile;
+
 
 /** 
  Deletes the temporary file.

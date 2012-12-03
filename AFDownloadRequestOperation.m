@@ -47,15 +47,22 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
 @property (nonatomic, copy) AFURLConnectionProgressiveOperationProgressBlock progressiveDownloadProgress;
 @end
 
-@implementation AFDownloadRequestOperation
+@implementation AFDownloadRequestOperation {
+  BOOL _useTemporaryFile;
+}
 
 #pragma mark - NSObject
 
 - (id)initWithRequest:(NSURLRequest *)urlRequest targetPath:(NSString *)targetPath shouldResume:(BOOL)shouldResume {
+  return [self initWithRequest:urlRequest targetPath:targetPath shouldResume:shouldResume useTemporaryFile:YES];
+}
+
+- (id)initWithRequest:(NSURLRequest *)urlRequest targetPath:(NSString *)targetPath shouldResume:(BOOL)shouldResume useTemporaryFile:(BOOL)useTemporaryFile {
     if ((self = [super initWithRequest:urlRequest])) {
         NSParameterAssert(targetPath != nil && urlRequest != nil);
         _shouldResume = shouldResume;
-
+        _useTemporaryFile = useTemporaryFile;
+      
         // Ee assume that at least the directory has to exist on the targetPath
         BOOL isDirectory;
         if(![[NSFileManager defaultManager] fileExistsAtPath:targetPath isDirectory:&isDirectory]) {
@@ -70,7 +77,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
         }
 
         // Download is saved into a temorary file and renamed upon completion.
-        NSString *tempPath = [self tempPath];
+      NSString *tempPath = [self tempPath];
 
         // Do we need to resume the file?
         BOOL isResuming = [self updateByteStartRangeForRequest];
@@ -107,6 +114,10 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
 #pragma mark - Public
 
 - (BOOL)deleteTempFileWithError:(NSError **)error {
+  //
+  if (!_useTemporaryFile)
+    return YES;
+  
     NSFileManager *fileManager = [NSFileManager new];
     BOOL success = YES;
     @synchronized(self) {
@@ -119,6 +130,9 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
 }
 
 - (NSString *)tempPath {
+  if (!_useTemporaryFile)
+    return _targetPath;
+  
     NSString *tempPath = nil;
     if (self.targetPath) {
         NSString *md5URLString = [[self class] md5StringForString:self.targetPath];
@@ -172,7 +186,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
             return;
 
         // loss of network connections = error set, but not cancel
-        }else if(!self.error) {
+        }else if(!self.error && _useTemporaryFile) {
             // move file to final position and capture error
             @synchronized(self) {
                 [[NSFileManager new] moveItemAtPath:[self tempPath] toPath:_targetPath error:&localError];
