@@ -238,7 +238,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
   
     // If file has been downloaded, completion block will be fired.
     unsigned long long downloadedBytes = [self fileSizeForPath:[self tempPath]];
-    if (downloadedBytes == totalContentLength) {
+    if (downloadedBytes >= totalContentLength) {
       self.completionBlock();
       [connection cancel];
       return;
