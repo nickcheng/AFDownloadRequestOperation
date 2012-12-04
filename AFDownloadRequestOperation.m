@@ -240,7 +240,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
     unsigned long long downloadedBytes = [self fileSizeForPath:[self tempPath]];
     if (downloadedBytes == totalContentLength) {
       self.completionBlock();
-      [self cancel];
+      [connection cancel];
       return;
     }
 
@@ -251,9 +251,6 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data  {
-    if (self.isCancelled)
-      return;
-  
     [super connection:connection didReceiveData:data];
 
     // track custom bytes read because totalBytesRead persists between pause/resume.
