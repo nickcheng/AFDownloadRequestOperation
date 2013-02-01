@@ -91,6 +91,9 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
         self.outputStream = [NSOutputStream outputStreamToFileAtPath:tempPath append:isResuming];
         // If the output stream can't be created, instantly destroy the object.
         if (!self.outputStream) return nil;
+        
+        // Give the object its default completionBlock.
+        [self setCompletionBlockWithSuccess:nil failure:nil];
     }
     return self;
 }
@@ -189,7 +192,11 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
         }else if(!self.error && _useTemporaryFile) {
             // move file to final position and capture error
             @synchronized(self) {
-                [[NSFileManager new] moveItemAtPath:[self tempPath] toPath:_targetPath error:&localError];
+                NSFileManager *fileManager = [NSFileManager new];
+                if (self.shouldOverwrite) {
+                    [fileManager removeItemAtPath:_targetPath error:NULL]; // avoid "File exists" error
+                }
+                [fileManager moveItemAtPath:[self tempPath] toPath:_targetPath error:&localError];
                 if (localError) {
                     _fileError = localError;
                 }
@@ -197,13 +204,17 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
         }
 
         if (self.error) {
-            dispatch_async(self.failureCallbackQueue ?: dispatch_get_main_queue(), ^{
-                failure(self, self.error);
-            });
+            if (failure) {
+                dispatch_async(self.failureCallbackQueue ?: dispatch_get_main_queue(), ^{
+                    failure(self, self.error);
+                });
+            }
         } else {
-            dispatch_async(self.successCallbackQueue ?: dispatch_get_main_queue(), ^{
-                success(self, _targetPath);
-            });
+            if (success) {
+                dispatch_async(self.successCallbackQueue ?: dispatch_get_main_queue(), ^{
+                    success(self, _targetPath);
+                });
+            }
         }
     };
 #pragma clang diagnostic pop
@@ -257,7 +268,9 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(NSInteger bytes
     self.totalBytesReadPerDownload += [data length];
 
     if (self.progressiveDownloadProgress) {
-        self.progressiveDownloadProgress((long long)[data length], self.totalBytesRead, self.response.expectedContentLength,self.totalBytesReadPerDownload + self.offsetContentLength, self.totalContentLength);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.progressiveDownloadProgress((long long)[data length], self.totalBytesRead, self.response.expectedContentLength,self.totalBytesReadPerDownload + self.offsetContentLength, self.totalContentLength);
+        });
     }
 }
 
