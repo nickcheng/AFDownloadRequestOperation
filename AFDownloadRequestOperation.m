@@ -53,6 +53,15 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 
 #pragma mark - NSObject
 
+- (void)dealloc {
+    if (_progressiveDownloadCallbackQueue) {
+#if !OS_OBJECT_USE_OBJC
+        dispatch_release(_progressiveDownloadCallbackQueue);
+#endif
+        _progressiveDownloadCallbackQueue = NULL;
+    }
+}
+
 - (id)initWithRequest:(NSURLRequest *)urlRequest targetPath:(NSString *)targetPath shouldResume:(BOOL)shouldResume {
   return [self initWithRequest:urlRequest targetPath:targetPath shouldResume:shouldResume useTemporaryFile:YES];
 }
@@ -103,7 +112,11 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
     BOOL isResuming = NO;
     if (self.shouldResume) {
         unsigned long long downloadedBytes = [self fileSizeForPath:[self tempPath]];
-        if (downloadedBytes > 0) {
+        if (downloadedBytes > 1) {
+
+            // If the the current download-request's data has been fully downloaded, but other causes of the operation failed (such as the inability of the incomplete temporary file copied to the target location), next, retry this download-request, the starting-value (equal to the incomplete temporary file size) will lead to an HTTP 416 out of range error, unless we subtract one byte here. (We don't know the final size before sending the request)
+            downloadedBytes--;
+
             NSMutableURLRequest *mutableURLRequest = [self.request mutableCopy];
             NSString *requestRange = [NSString stringWithFormat:@"bytes=%llu-", downloadedBytes];
             [mutableURLRequest setValue:requestRange forHTTPHeaderField:@"Range"];
@@ -116,11 +129,11 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 
 #pragma mark - Public
 
-- (BOOL)deleteTempFileWithError:(NSError **)error {
-  //
-  if (!_useTemporaryFile)
-    return YES;
-  
+- (BOOL)deleteTempFileWithError:(NSError *__autoreleasing*)error {
+    //
+    if (!_useTemporaryFile)
+        return YES;
+
     NSFileManager *fileManager = [NSFileManager new];
     BOOL success = YES;
     @synchronized(self) {
@@ -133,8 +146,8 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 }
 
 - (NSString *)tempPath {
-  if (!_useTemporaryFile)
-    return _targetPath;
+    if (!_useTemporaryFile)
+        return _targetPath;
   
     NSString *tempPath = nil;
     if (self.targetPath) {
@@ -148,6 +161,25 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 - (void)setProgressiveDownloadProgressBlock:(void (^)(AFDownloadRequestOperation *operation, NSInteger bytesRead, long long totalBytesRead, long long totalBytesExpected, long long totalBytesReadForFile, long long totalBytesExpectedToReadForFile))block {
     self.progressiveDownloadProgress = block;
 }
+
+- (void)setProgressiveDownloadCallbackQueue:(dispatch_queue_t)progressiveDownloadCallbackQueue {
+    if (progressiveDownloadCallbackQueue != _progressiveDownloadCallbackQueue) {
+        if (_progressiveDownloadCallbackQueue) {
+#if !OS_OBJECT_USE_OBJC
+            dispatch_release(_progressiveDownloadCallbackQueue);
+#endif
+            _progressiveDownloadCallbackQueue = NULL;
+        }
+        
+        if (progressiveDownloadCallbackQueue) {
+#if !OS_OBJECT_USE_OBJC
+            dispatch_retain(progressiveDownloadCallbackQueue);
+#endif
+            _progressiveDownloadCallbackQueue = progressiveDownloadCallbackQueue;
+        }
+    }
+}
+
 
 #pragma mark - Private
 
@@ -250,7 +282,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
             NSArray *bytes = [contentRange componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@" -/"]];
             if ([bytes count] == 4) {
                 fileOffset = [bytes[1] longLongValue];
-                totalContentLength = [bytes[2] longLongValue]; // if this is *, it's converted to 0
+                totalContentLength = [bytes[3] longLongValue]; // if this is *, it's converted to 0
             }
         }
     }
@@ -270,13 +302,16 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data  {
+    if (![self hasAcceptableStatusCode] || ![self hasAcceptableContentType])
+        return; // don't write to output stream if any error occurs
+
     [super connection:connection didReceiveData:data];
 
     // track custom bytes read because totalBytesRead persists between pause/resume.
     self.totalBytesReadPerDownload += [data length];
 
     if (self.progressiveDownloadProgress) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_async(self.progressiveDownloadCallbackQueue ?: dispatch_get_main_queue(), ^{
             self.progressiveDownloadProgress(self,(long long)[data length], self.totalBytesRead, self.response.expectedContentLength,self.totalBytesReadPerDownload + self.offsetContentLength, self.totalContentLength);
         });
     }
@@ -285,18 +320,20 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 #pragma mark - Static
 
 + (NSString *)cacheFolder {
+    NSFileManager *filemgr = [NSFileManager new];
     static NSString *cacheFolder;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
+
+    if (!cacheFolder) {
         NSString *cacheDir = NSTemporaryDirectory();
         cacheFolder = [cacheDir stringByAppendingPathComponent:kAFNetworkingIncompleteDownloadFolderName];
+    }
 
-        // ensure all cache directories are there (needed only once)
-        NSError *error = nil;
-        if(![[NSFileManager new] createDirectoryAtPath:cacheFolder withIntermediateDirectories:YES attributes:nil error:&error]) {
-            NSLog(@"Failed to create cache directory at %@", cacheFolder);
-        }
-    });
+    // ensure all cache directories are there
+    NSError *error = nil;
+    if(![filemgr createDirectoryAtPath:cacheFolder withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSLog(@"Failed to create cache directory at %@", cacheFolder);
+        cacheFolder = nil;
+    }
     return cacheFolder;
 }
 
